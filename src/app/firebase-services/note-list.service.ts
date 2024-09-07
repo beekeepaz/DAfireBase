@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Note } from '../interfaces/note.interface';
-import { collectionData, collection, Firestore, doc, onSnapshot, addDoc, updateDoc } from '@angular/fire/firestore';
+import { collectionData, collection, Firestore, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit } from '@angular/fire/firestore';
 import { Observable } from 'rxjs';
 
 @Injectable({
@@ -9,9 +9,11 @@ import { Observable } from 'rxjs';
 export class NoteListService {
   trashNotes: Note[] = [];
   normalNotes: Note[] = [];
+  normalMarkedNotes: Note[] = [];
 
   unsubTrash;
   unsubNotes;
+  unsubMarkedNotes;
   // unsubSingle;
 
   // items$;
@@ -23,6 +25,7 @@ export class NoteListService {
 
     this.unsubTrash = this.subTrashList();
     this.unsubNotes = this.subNotesList();
+    this.unsubMarkedNotes = this.subMarkedNotesList();
 
     // this.unsubSingle = onSnapshot(this.getSingleDocRef("notes", "3wmimFGXpwhEwzRLsHZj"), (element) => {
     // });
@@ -38,6 +41,12 @@ export class NoteListService {
 
   }
 
+  async deleteNote(colId: "notes" | "trash", docId: string) {
+    await deleteDoc(this.getSingleDocRef(colId, docId)).catch(
+      (err) => { console.log(err); }
+    )
+  }
+
   async updateNote(note: Note) {
     if (note.id) {
       let docRef = this.getSingleDocRef(this.getColIdFromNote(note), note.id);
@@ -47,39 +56,56 @@ export class NoteListService {
     }
   }
 
-  getCleanJson(note: Note):{} {
+  getCleanJson(note: Note): {} {
     return {
       type: note.type,
       title: note.title,
       content: note.content,
       marked: note.marked,
-    }
+    };
   }
 
   getColIdFromNote(note: Note) {
     if (note.type == 'note') {
-      return 'note'
+      return 'notes';
     } else {
-      return 'trash'
+      return 'trash';
     }
   }
 
-  async addNote(item: Note) {
-    await addDoc(this.getNotesRef(), item).catch(
-      (err) => { console.error(err) }
-    ).then(
-      (docRef) => { console.log("Document written with ID: ", docRef?.id); }
-    )
+  async addNote(item: Note, colId: "notes" | "trash") {
+    if (colId == "notes") {
+      await addDoc(this.getNotesRef(), item).catch(
+        (err) => { console.error(err) }
+      ).then(
+        (docRef) => { console.log("Document written with ID: ", docRef?.id); }
+      )
+    } else if (colId == "trash") {
+      await addDoc(this.getTrashRef(), item);
+    }
   }
 
   ngonDestroy() {
     this.unsubTrash();
     this.unsubNotes();
+    this.subMarkedNotesList();
     // this.items.unsubscribe();
   }
 
+  subMarkedNotesList() {
+    // gamble, subNotesList, extension orderBy("title"), where("marked", "==", true)
+    const q = query(this.getNotesRef(), where("marked", "==", true), limit(100));
+    // const q = query(this.getNotesRef(), orderBy("title"), limit(100));
+    return onSnapshot(q, (list) => {
+      this.normalMarkedNotes = [];
+      list.forEach((element) => {
+        this.normalMarkedNotes.push(this.setNoteObject(element.data(), element.id));
+      });
+    })
+  }
+
   subTrashList() {
-    return onSnapshot(this.getNotesRef(), (list) => {
+    return onSnapshot(this.getTrashRef(), (list) => {
       this.trashNotes = [];
       list.forEach(element => {
         this.trashNotes.push(this.setNoteObject(element.data(), element.id));
@@ -88,7 +114,10 @@ export class NoteListService {
   }
 
   subNotesList() {
-    return onSnapshot(this.getNotesRef(), (list) => {
+    // gamble, show subMarkedNotesList, extension orderBy("title"), where("marked", "==", true)
+    const q = query(this.getNotesRef(), limit(100));
+    // const q = query(this.getNotesRef(), orderBy("title"), limit(1));
+    return onSnapshot(q, (list) => {
       this.normalNotes = [];
       list.forEach(element => {
         this.normalNotes.push(this.setNoteObject(element.data(), element.id));
@@ -98,12 +127,12 @@ export class NoteListService {
 
   setNoteObject(obj: any, id: string): Note {
     return {
-      id: id,
+      id: id || "",
       type: obj.type || "note",
       title: obj.title || "",
       content: obj.content || "",
       marked: obj.marked || false,
-    }
+    };
   }
 
   getNotesRef() {
